@@ -46,7 +46,7 @@ $.extend($.fn, {
 					event.preventDefault();
 				}
 				function handle() {
-					var hidden;
+					var hidden, result;
 					if ( validator.settings.submitHandler ) {
 						if ( validator.submitButton ) {
 							// insert a hidden input as a replacement for the missing submit button
@@ -55,10 +55,13 @@ $.extend($.fn, {
 								.val( $( validator.submitButton ).val() )
 								.appendTo( validator.currentForm );
 						}
-						validator.settings.submitHandler.call( validator, validator.currentForm, event );
+						result = validator.settings.submitHandler.call( validator, validator.currentForm, event );
 						if ( validator.submitButton ) {
 							// and clean up afterwards; thanks to no-block-scope, hidden can be referenced
 							hidden.remove();
+						}
+						if ( result !== undefined ) {
+							return result;
 						}
 						return false;
 					}
@@ -87,16 +90,19 @@ $.extend($.fn, {
 	},
 	// http://jqueryvalidation.org/valid/
 	valid: function() {
-		var valid, validator;
+		var valid, validator, errorList;
 
 		if ( $( this[ 0 ] ).is( "form" ) ) {
 			valid = this.validate().form();
 		} else {
+			errorList = [];
 			valid = true;
 			validator = $( this[ 0 ].form ).validate();
 			this.each( function() {
 				valid = validator.element( this ) && valid;
+				errorList = errorList.concat( validator.errorList );
 			});
+			validator.errorList = errorList;
 		}
 		return valid;
 	},
@@ -229,6 +235,7 @@ $.extend( $.validator, {
 		errorClass: "error",
 		validClass: "valid",
 		errorElement: "label",
+		focusCleanup: false,
 		focusInvalid: true,
 		errorContainer: $( [] ),
 		errorLabelContainer: $( [] ),
@@ -238,8 +245,8 @@ $.extend( $.validator, {
 		onfocusin: function( element ) {
 			this.lastActive = element;
 
-			// hide error label and remove error class on focus if enabled
-			if ( this.settings.focusCleanup && !this.blockFocusCleanup ) {
+			// Hide error label and remove error class on focus if enabled
+			if ( this.settings.focusCleanup ) {
 				if ( this.settings.unhighlight ) {
 					this.settings.unhighlight.call( this, element, this.settings.errorClass, this.settings.validClass );
 				}
@@ -252,7 +259,26 @@ $.extend( $.validator, {
 			}
 		},
 		onkeyup: function( element, event ) {
-			if ( event.which === 9 && this.elementValue( element ) === "" ) {
+			// Avoid revalidate the field when pressing one of the following keys
+			// Shift       => 16
+			// Ctrl        => 17
+			// Alt         => 18
+			// Caps lock   => 20
+			// End         => 35
+			// Home        => 36
+			// Left arrow  => 37
+			// Up arrow    => 38
+			// Right arrow => 39
+			// Down arrow  => 40
+			// Insert      => 45
+			// Num lock    => 144
+			// AltGr key   => 225
+			var excludedKeys = [
+				16, 17, 18, 20, 35, 36, 37,
+				38, 39, 40, 45, 144, 225
+			];
+
+			if ( event.which === 9 && this.elementValue( element ) === "" || excludedKeys.indexOf( event.keyCode ) !== -1 ) {
 				return;
 			} else if ( element.name in this.submitted || element === this.lastElement ) {
 				this.element( element );
@@ -451,10 +477,18 @@ $.extend( $.validator, {
 			this.lastElement = null;
 			this.prepareForm();
 			this.hideErrors();
-			this.elements()
-					.removeClass( this.settings.errorClass )
-					.removeData( "previousValue" )
-					.removeAttr( "aria-invalid" );
+			var i, elements = this.elements()
+				.removeData( "previousValue" )
+				.removeAttr( "aria-invalid" );
+
+			if ( this.settings.unhighlight ) {
+				for ( i = 0; elements[ i ]; i++ ) {
+					this.settings.unhighlight.call( this, elements[ i ],
+						this.settings.errorClass, "" );
+				}
+			} else {
+				elements.removeClass( this.settings.errorClass );
+			}
 		},
 
 		numberOfInvalids: function() {
@@ -567,7 +601,7 @@ $.extend( $.validator, {
 				type = element.type;
 
 			if ( type === "radio" || type === "checkbox" ) {
-				return $( "input[name='" + element.name + "']:checked" ).val();
+				return this.findByName( element.name ).filter(":checked").val();
 			} else if ( type === "number" && typeof element.validity !== "undefined" ) {
 				return element.validity.badInput ? false : $element.val();
 			}
@@ -617,6 +651,10 @@ $.extend( $.validator, {
 					if ( this.settings.debug && window.console ) {
 						console.log( "Exception occurred when checking element " + element.id + ", check the '" + rule.method + "' method.", e );
 					}
+					if ( e instanceof TypeError ) {
+						e.message += ".  Exception occurred when checking element " + element.id + ", check the '" + rule.method + "' method.";
+					}
+
 					throw e;
 				}
 			}
@@ -766,7 +804,7 @@ $.extend( $.validator, {
 					// If the element is not a child of an associated label, then it's necessary
 					// to explicitly apply aria-describedby
 
-					errorID = error.attr( "id" );
+					errorID = error.attr( "id" ).replace( /(:|\.|\[|\]|\$)/g, "\\$1");
 					// Respect existing non-error aria-describedby
 					if ( !describedBy ) {
 						describedBy = errorID;
@@ -803,6 +841,7 @@ $.extend( $.validator, {
 			var name = this.idOrName( element ),
 				describer = $( element ).attr( "aria-describedby" ),
 				selector = "label[for='" + name + "'], label[for='" + name + "'] *";
+
 			// aria-describedby should directly reference the error element
 			if ( describer ) {
 				selector = selector + ", #" + describer.replace( /\s+/g, ", #" );
@@ -817,11 +856,14 @@ $.extend( $.validator, {
 		},
 
 		validationTargetFor: function( element ) {
-			// if radio/checkbox, validate first element in group instead
+
+			// If radio/checkbox, validate first element in group instead
 			if ( this.checkable( element ) ) {
-				element = this.findByName( element.name ).not( this.settings.ignore )[ 0 ];
+				element = this.findByName( element.name );
 			}
-			return element;
+
+			// Always apply ignore filter
+			return $( element ).not( this.settings.ignore )[ 0 ];
 		},
 
 		checkable: function( element ) {
@@ -1049,12 +1091,12 @@ $.extend( $.validator, {
 
 		if ( $.validator.autoCreateRanges ) {
 			// auto-create ranges
-			if ( rules.min && rules.max ) {
+			if ( rules.min != null && rules.max != null ) {
 				rules.range = [ rules.min, rules.max ];
 				delete rules.min;
 				delete rules.max;
 			}
-			if ( rules.minlength && rules.maxlength ) {
+			if ( rules.minlength != null && rules.maxlength != null ) {
 				rules.rangelength = [ rules.minlength, rules.maxlength ];
 				delete rules.minlength;
 				delete rules.maxlength;
@@ -1106,7 +1148,7 @@ $.extend( $.validator, {
 
 		// http://jqueryvalidation.org/email-method/
 		email: function( value, element ) {
-			// From http://www.whatwg.org/specs/web-apps/current-work/multipage/states-of-the-type-attribute.html#e-mail-state-%28type=email%29
+			// From https://html.spec.whatwg.org/multipage/forms.html#valid-e-mail-address
 			// Retrieved 2014-01-14
 			// If you have a problem with this implementation, report a bug against the above spec
 			// Or use custom methods to implement your own email validation
@@ -1131,7 +1173,7 @@ $.extend( $.validator, {
 
 		// http://jqueryvalidation.org/number-method/
 		number: function( value, element ) {
-			return this.optional( element ) || /^-?(?:\d+|\d{1,3}(?:,\d{3})+)?(?:\.\d+)?$/.test( value );
+		    return this.optional( element ) || /^(?:-?\d+|-?\d{1,3}(?:,\d{3})+)?(?:\.\d+)?$/.test( value );
 		},
 
 		// http://jqueryvalidation.org/digits-method/
@@ -1140,7 +1182,7 @@ $.extend( $.validator, {
 		},
 
 		// http://jqueryvalidation.org/creditcard-method/
-		// based on http://en.wikipedia.org/wiki/Luhn/
+		// based on http://en.wikipedia.org/wiki/Luhn_algorithm
 		creditcard: function( value, element ) {
 			if ( this.optional( element ) ) {
 				return "dependency-mismatch";
@@ -1179,19 +1221,19 @@ $.extend( $.validator, {
 
 		// http://jqueryvalidation.org/minlength-method/
 		minlength: function( value, element, param ) {
-			var length = $.isArray( value ) ? value.length : this.getLength( $.trim( value ), element );
+			var length = $.isArray( value ) ? value.length : this.getLength( value, element );
 			return this.optional( element ) || length >= param;
 		},
 
 		// http://jqueryvalidation.org/maxlength-method/
 		maxlength: function( value, element, param ) {
-			var length = $.isArray( value ) ? value.length : this.getLength( $.trim( value ), element );
+			var length = $.isArray( value ) ? value.length : this.getLength( value, element );
 			return this.optional( element ) || length <= param;
 		},
 
 		// http://jqueryvalidation.org/rangelength-method/
 		rangelength: function( value, element, param ) {
-			var length = $.isArray( value ) ? value.length : this.getLength( $.trim( value ), element );
+			var length = $.isArray( value ) ? value.length : this.getLength( value, element );
 			return this.optional( element ) || ( length >= param[ 0 ] && length <= param[ 1 ] );
 		},
 

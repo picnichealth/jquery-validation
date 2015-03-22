@@ -93,6 +93,7 @@ test("number", function() {
 	ok( method( "-123,000" ), "Valid number" );
 	ok( method( "123,000.00" ), "Valid number" );
 	ok( method( "-123,000.00" ), "Valid number" );
+	ok(!method( "-" ), "Invalid number" );
 	ok(!method( "123.000,00" ), "Invalid number" );
 	ok(!method( "123.0.0,0" ), "Invalid number" );
 	ok(!method( "x123" ), "Invalid number" );
@@ -236,7 +237,7 @@ test("minlength", function() {
 		param = 2,
 		e = $("#text1, #text1c, #text2, #text3");
 	ok( method.call( v, e[0].value, e[0], param), "Valid text input" );
-	ok(!method.call( v, e[1].value, e[1], param), "Invalid text input" );
+	ok( method.call( v, e[1].value, e[1], param), "Valid text input" );
 	ok(!method.call( v, e[2].value, e[2], param), "Invalid text input" );
 	ok( method.call( v, e[3].value, e[3], param), "Valid text input" );
 
@@ -918,6 +919,13 @@ test("pattern", function() {
 	ok( method( "AR1004", "AR\\d{4}" ), "Correct format for the given RegExp" );
 	ok( method( "AR1004", /^AR\d{4}$/ ), "Correct format for the given RegExp" );
 	ok(!method( "BR1004", /^AR\d{4}$/ ), "Invalid format for the given RegExp" );
+	ok( method( "1ABC", "[0-9][A-Z]{3}" ), "Correct format for the given RegExp" );
+	ok(!method( "ABC", "[0-9][A-Z]{3}" ), "Invalid format for the given RegExp" );
+	ok(!method( "1ABC DEF", "[0-9][A-Z]{3}" ), "Invalid format for the given RegExp" );
+	ok( method( "1ABCdef", "[a-zA-Z0-9]+" ), "Correct format for the given RegExp" );
+	ok(!method( "1ABC def", "[a-zA-Z0-9]+" ), "Invalid format for the given RegExp" );
+	ok( method( "2014-10-02", "[0-9]{4}-(0[1-9]|1[012])-(0[1-9]|1[0-9]|2[0-9]|3[01])" ), "Correct format for the given RegExp" );
+	ok(!method( "02-10-2014", "[0-9]{4}-(0[1-9]|1[012])-(0[1-9]|1[0-9]|2[0-9]|3[01])" ), "Invalid format for the given RegExp" );
 });
 
 function testCardTypeByNumber(number, cardname, expected) {
@@ -1252,6 +1260,27 @@ test("stateUS", function() {
 	ok( method( "me", { caseSensitive: false } ), "Valid US state" );
 	ok(!method( "az", { caseSensitive: true } ), "Must be capital letters" );
 	ok(!method( "mp", { caseSensitive: false, includeTerritories: false } ), "US territories not allowed" );
+});
+
+test("postalcodeBR", function() {
+	var method = methodTest("postalcodeBR");
+	ok( method( "99999-999"), "Valid BR Postal Code");
+	ok( method( "99999999"), "Valid BR Postal Code");
+	ok( method( "99.999-999"), "Valid BR Postal Code");
+	ok( !method( "99.999999"), "Invalid BR Postal Code");
+});
+
+test("cpfBR", function() {
+	var method = methodTest("cpfBR");
+	ok( method( "11144477735"), "Valid CPF Number");
+	ok( method( "263.946.533-30"), "Valid CPF Number");
+	ok( method( "325 861 044 47"), "Valid CPF Number");
+	ok( method( "859-684-732-40"), "Valid CPF Number");
+	ok( !method( "99999999999"), "Invalid CPF Number: dump data");
+	ok( !method( "1114447773"), "Invalid CPF Number: < 11 digits");
+	ok( !method( "111444777355"), "Invalid CPF Number: > 11 digits");
+	ok( !method( "11144477715"), "Invalid CPF Number: 1st check number failed");
+	ok( !method( "11144477737"), "Invalid CPF Number: 2nd check number failed");
 });
 
 })(jQuery);

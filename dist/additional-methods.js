@@ -1,9 +1,9 @@
 /*!
- * jQuery Validation Plugin v1.13.1-pre
+ * jQuery Validation Plugin v1.13.2-pre
  *
  * http://jqueryvalidation.org/
  *
- * Copyright (c) 2014 Jörn Zaefferer
+ * Copyright (c) 2015 Jörn Zaefferer
  * Released under the MIT license
  */
 (function( factory ) {
@@ -188,6 +188,64 @@ $.validator.addMethod( "cifES", function( value ) {
 
 }, "Please specify a valid CIF number." );
 
+/*
+ * Brazillian CPF number (Cadastrado de Pessoas Físicas) is the equivalent of a Brazilian tax registration number.
+ * CPF numbers have 11 digits in total: 9 numbers followed by 2 check numbers that are being used for validation.
+ */
+$.validator.addMethod("cpfBR", function(value) {
+	// Removing special characters from value
+	value = value.replace(/([~!@#$%^&*()_+=`{}\[\]\-|\\:;'<>,.\/? ])+/g, "");
+
+	// Checking value to have 11 digits only
+	if (value.length !== 11) {
+		return false;
+	}
+
+	var sum = 0,
+		firstCN, secondCN, checkResult, i;
+
+	firstCN = parseInt(value.substring(9, 10), 10);
+	secondCN = parseInt(value.substring(10, 11), 10);
+
+	checkResult = function(sum, cn) {
+		var result = (sum * 10) % 11;
+		if ((result === 10) || (result === 11)) {result = 0;}
+		return (result === cn);
+	};
+
+	// Checking for dump data
+	if (value === "" ||
+		value === "00000000000" ||
+		value === "11111111111" ||
+		value === "22222222222" ||
+		value === "33333333333" ||
+		value === "44444444444" ||
+		value === "55555555555" ||
+		value === "66666666666" ||
+		value === "77777777777" ||
+		value === "88888888888" ||
+		value === "99999999999"
+	) {
+		return false;
+	}
+
+	// Step 1 - using first Check Number:
+	for ( i = 1; i <= 9; i++ ) {
+		sum = sum + parseInt(value.substring(i - 1, i), 10) * (11 - i);
+	}
+
+	// If first Check Number (CN) is valid, move to Step 2 - using second Check Number:
+	if ( checkResult(sum, firstCN) ) {
+		sum = 0;
+		for ( i = 1; i <= 10; i++ ) {
+			sum = sum + parseInt(value.substring(i - 1, i), 10) * (12 - i);
+		}
+		return checkResult(sum, secondCN);
+	}
+	return false;
+
+}, "Please specify a valid CPF number");
+
 /* NOTICE: Modified version of Castle.Components.Validator.CreditCardValidator
  * Redistributed under the the Apache License 2.0 at http://www.apache.org/licenses/LICENSE-2.0
  * Valid Types: mastercard, visa, amex, dinersclub, enroute, discover, jcb, unknown, all (overrides all other settings)
@@ -302,7 +360,7 @@ $.validator.addMethod("currency", function(value, element, param) {
 
 $.validator.addMethod("dateFA", function(value, element) {
 	return this.optional(element) || /^[1-4]\d{3}\/((0?[1-6]\/((3[0-1])|([1-2][0-9])|(0?[1-9])))|((1[0-2]|(0?[7-9]))\/(30|([1-2][0-9])|(0?[1-9]))))$/.test(value);
-}, "Please enter a correct date");
+}, $.validator.messages.date);
 
 /**
  * Return true, if the value is a valid date, also making this formal check dd/mm/yyyy.
@@ -342,11 +400,11 @@ $.validator.addMethod("dateITA", function(value, element) {
 		check = false;
 	}
 	return this.optional(element) || check;
-}, "Please enter a correct date");
+}, $.validator.messages.date);
 
 $.validator.addMethod("dateNL", function(value, element) {
 	return this.optional(element) || /^(0?[1-9]|[12]\d|3[01])[\.\/\-](0?[1-9]|1[012])[\.\/\-]([12]\d)?(\d\d)$/.test(value);
-}, "Please enter a correct date");
+}, $.validator.messages.date);
 
 // Older "accept" file extension method. Old docs: http://docs.jquery.com/Plugins/Validation/Methods/accept
 $.validator.addMethod("extension", function(value, element, param) {
@@ -378,10 +436,6 @@ $.validator.addMethod("iban", function(value, element) {
 		cRest = "",
 		cOperator = "",
 		countrycode, ibancheck, charAt, cChar, bbanpattern, bbancountrypatterns, ibanregexp, i, p;
-
-	if (!(/^([a-zA-Z0-9]{4} ){2,8}[a-zA-Z0-9]{1,4}|[a-zA-Z0-9]{12,34}$/.test(iban))) {
-		return false;
-	}
 
 	// check the country code and find the country specific format
 	countrycode = iban.substring(0, 2);
@@ -587,6 +641,10 @@ $.validator.addMethod( "nifES", function( value ) {
 
 }, "Please specify a valid NIF number." );
 
+jQuery.validator.addMethod( "notEqualTo", function( value, element, param ) {
+	return this.optional(element) || !$.validator.methods.equalTo.call( this, value, element, param );
+}, "Please enter a different value, values must not be the same." );
+
 $.validator.addMethod("nowhitespace", function(value, element) {
 	return this.optional(element) || /^\S+$/i.test(value);
 }, "No white space please");
@@ -609,7 +667,7 @@ $.validator.addMethod("pattern", function(value, element, param) {
 		return true;
 	}
 	if (typeof param === "string") {
-		param = new RegExp(param);
+		param = new RegExp("^(?:" + param + ")$");
 	}
 	return param.test(value);
 }, "Invalid format.");
@@ -688,6 +746,18 @@ $.validator.addMethod("phonesUK", function(phone_number, element) {
 $.validator.addMethod( "postalCodeCA", function( value, element ) {
 	return this.optional( element ) || /^[ABCEGHJKLMNPRSTVXY]\d[A-Z] \d[A-Z]\d$/.test( value );
 }, "Please specify a valid postal code" );
+
+/*
+* Valida CEPs do brasileiros:
+*
+* Formatos aceitos:
+* 99999-999
+* 99.999-999
+* 99999999
+*/
+$.validator.addMethod("postalcodeBR", function(cep_value, element) {
+	return this.optional(element) || /^\d{2}.\d{3}-\d{3}?$|^\d{5}-?\d{3}?$/.test( cep_value );
+}, "Informe um CEP válido.");
 
 /* Matches Italian postcode (CAP) */
 $.validator.addMethod("postalcodeIT", function(value, element) {
@@ -822,7 +892,7 @@ $.validator.addMethod("skip_or_fill_minimum", function(value, element, options) 
  *
  */
 
-jQuery.validator.addMethod("stateUS", function(value, element, options) {
+$.validator.addMethod("stateUS", function(value, element, options) {
 	var isDefault = typeof options === "undefined",
 		caseSensitive = ( isDefault || typeof options.caseSensitive === "undefined" ) ? false : options.caseSensitive,
 		includeTerritories = ( isDefault || typeof options.includeTerritories === "undefined" ) ? false : options.includeTerritories,
